@@ -129,7 +129,7 @@ The gRPC Server implements handlers for all supported job actions listed in the 
 
 The server is responsible for
 - Implementing all RPC methods defined in the `.proto` file with appropriate responses and status codes.
-- Authentication using mTLS certificates and authorization using CN name derived from the client certificate.
+- Authentication using mTLS with client and server certificates and authorization using CN name derived from the client certificate.
 - Wrapping the job manager library and graceful shutdown of all goroutines when exiting.
 
 ## Job Manager API Libary
