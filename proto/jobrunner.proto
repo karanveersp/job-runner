@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+option go_package = "github.com/karanveersp/job-runner/proto;jobrunner";
+
+package job_runner;
+
+// JobRunner is a remote job execution service.
+service JobRunner {
+    // Start takes a command, executes it and begins tailing the output
+    rpc Start(Command) returns (stream Output) {}
+
+    // Stop takes a job id and returns success or error. A User can only
+    // stop jobs that they have started, while Admins can stop any job.
+    rpc Stop(Job) returns (Empty) {}
+
+    // List takes no input and returns a collection of job metadata values.
+    // Users only see jobs that they have started, while Admins can see all jobs.
+    rpc List(Empty) returns (stream JobMetadata) {}
+
+    // Monitor takes a job id and tails the output from the beginning. A User
+    // can only monitor their jobs, while Admins can monitor any job.
+    rpc Monitor(Job) returns (stream Output) {}
+}
+
+// Status models all job states
+enum Status {
+    PENDING = 0;
+    RUNNING = 1;
+    COMPLETED = 2;
+    FAILED = 3;
+    STOPPED = 4;
+}
+
+// Empty represents a unit or empty value
+message Empty {}
+
+// Command is a simple wrapper on the command string
+message Command {
+    string cmd = 1;
+}
+
+// Job is a simple wrapper on the job's guid string
+message Job {
+    string id = 1;  // assigned job id
+}
+
+// JobMetadata provides job info
+message JobMetadata {
+    string job_id = 1;     // assigned job id
+    string cmd = 2;        // original command
+    string duration = 3;   // time spent in running state
+    Status status = 4;     // job status
+    string started_at = 5;    // ISO timestamp
+}
+
+// Output is a wrapper on the []byte received from the server
+message Output {
+    bytes chunk = 1;           // raw bytes representing output
+    JobMetadata metadata = 2;  // job metadata
+}

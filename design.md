@@ -4,23 +4,25 @@ This document describes a solution for a remote job execution service to run arb
 
 ## Design Principles
 
-This design aims to be modular, performant, and reliable. It implements the core components according to best practices, with the minimum required functionality, while noting areas for future development.
+This design aims to be modular, performant, and reliable. Implementation of the core components will strive to attain the minimum required functionality with expressive APIs that work well with each other.
 
-It leverages the strengths of Go for concurrent workflows and gRPC for performant, secure communication.
+Opportunities for improvements, or abbreviations of certain features will be indicated in comments.
+
+The implementation strives to showcase the strengths of Go for managing concurrent workflows and gRPC for performant, secure communication.
 
 
 ## Overview
 
 The system comprises of 3 core components.
-- A job manager library to abstract job execution, persistence, and queries.
 - A CLI app to start, stop, monitor and list jobs.
-- A Server that responds to each client action by delegating to the job manager library.
+- A Server that delegates actions to a job manager library and returns results to the client.
+- A job manager library to abstract the implementation details of job execution, persistence, and queries.
 
-The job manager handles job actions, and persists each job with specific states such as `pending`, `running`, or `completed`, as well as their outputs for future queries.
+There is no restriction on the commands to be executed and they can target any program available on the machine hosting the gRPC server.
 
-There is no restriction on the commands to be executed and they can target any program available on the machine hosting the gRPC service.
+A job's output can be text or raw binary data and is streamed to the client when they start or monitor a job.
 
-The following diagram illustrates the core modules and how they relate to each other.
+The following diagram illustrates the commands, core modules and how they relate to each other.
 
 ![Job Runner Diagram](JobRunnerDiagram.jpg)
 
@@ -28,7 +30,7 @@ The following diagram illustrates the core modules and how they relate to each o
 
 The system uses mTLS authentication to create a secure communication channel between CLI clients and the gRPC server.
 
-Ther server uses the identity information contained in the client certificate to determine the client's role based on their CN name; either `user` or `admin`.
+Ther server uses the CN name contained in the client certificate to determine the client's role; either `user` or `admin`.
 
 ### Role differences
 - Users can list, monitor and stop jobs that they submitted.
@@ -46,26 +48,24 @@ Since the app explicitly enables the execution of any program on the server, vul
 
 In short, a user can wreak catastrophic havoc on the system and organization.
 
-If commands can be executed in a sandboxed environment without direct access to the server host, some of these risks can be mitigated.
+If commands can be executed in a sandboxed environment with bounded resources, and without direct access to the server host, some of these risks can be mitigated.
 
 
 ## CLI
 
-The `jobr` CLI app is a user-friendly interface for job management.
+The `jobr` CLI app is a user-friendly interface for remote job execution and management.
 
 `-h` or `--help` - Provides CLI usage information.
-
 
 For mTLS authentication, the client must set two environment variables:
 - `SSL_CERT` - Path to public certificate containing identity information and public key.
 - `SSL_KEY` - Path to private key file to generate a signature that the server verifies.
 
+### Commands 
 
-### Start
+#### Start
 
-```sh
-start "<command with args>"
-```
+`start "<command with args>"`
 
 Submits the given shell command to the server and tails the job output, until the user presses ctrl+c. The job continues processing even if the client is no longer tailing the output.
 
@@ -76,14 +76,28 @@ Hello!
 ```
 
 
+#### List jobs
 
-### Stop
+`ls`
 
+Lists all jobs submitted by the user. If the user is an admin, then lists jobs submitted by all users.
+
+Example
 ```sh
-stop <jobId>
+$ jobr ls
+JOB ID     COMMAND       STATUS     DURATION START TIME
+7766b      "echo Hello!" completed  1ms      2025-10-20T22:10:04.191Z
+112ab      "echo test"   completed  1ms      2025-10-20T22:11:00.191Z
 ```
 
+
+#### Stop
+
+`stop <jobId>`
+
 Stops the job denoted by the given `jobId`. The `jobId` is a 5 character GUID assigned to each submitted job by the job manager which can be queried using the `ls` command.
+A user can stop jobs they have started, while an admin can stop any job.
+An empty response indicates success, while an error with a status code provides information for why the job couldn't be stopped (NOT_FOUND, UNAUTHORIZED).
 
 Example
 ```sh
@@ -91,30 +105,13 @@ $ jobr stop 7766b
 stop succeeded
 ```
 
-### List jobs
 
-```sh
-ls
-```
+#### Monitor
 
-Lists all jobs submitted by the user. If the user is an admin, then lists jobs submitted by all users.
-
-Example
-```sh
-$ jobr ls
-JOB ID     COMMAND       STATUS     DURATION
-7766b      "echo Hello!" completed  1ms
-112ab      "echo test"   completed  1ms
-```
-
-
-### Monitor
-
-```sh
-monitor <jobId>
-```
+`monitor <jobId>`
 
 Queries the job's output from the beginning and tails it until the user presses ctrl+c.
+A user can monitor jobs they have started, while an admin can monitor any job.
 
 Example
 ```sh
@@ -123,19 +120,26 @@ test
 ```
 
 
-## API Server
+## GRPC Server
 
 The gRPC Server implements handlers for all supported job actions listed in the `.proto` file. For certain rpc methods, the responses can change based on the client's role derived from their certificate identity.
+
+The server is responsible for
+- Implementing all RPC methods defined in the `.proto` file with appropriate responses and status codes.
+- Authentication using mTLS certificates and authorization using CN name derived from the client certificate.
+- Wrapping the job manager library and graceful shutdown of all goroutines when exiting.
 
 ## Job Manager API Libary
 
 The job manager library implements the functionality to start, stop, persist and monitor job executions on the server.
 
+Note that all data is persisted in-memory and will be lost when the GRPC Server restarts.
+
 It is responsible for
 - Accepting new jobs for concurrent job execution using a worker pool.
 - Persisting job metadata and outputs for each submitted job.
-  - Creating a 5 character GUID for a job
-  - Calculating job duration by using the job start time from the present.
+  - Job ID is a 5 character GUI
+  - Job duration based on how much time was spent in the running state.
 - Updating the job status appropriately
   - `pending` for jobs accepted but not started
   - `running` for jobs executing on the server
@@ -143,10 +147,11 @@ It is responsible for
   - `failed` for jobs that finished execution with a nonzero exit code, or timed out
   - `stopped` for jobs that were explicitly stopped by a user or admin
 - Tailing job output independent of job execution.
-- Gracefully handling stopping a job by terminating the process as well as the observation of its output/status.
+- Gracefully stopping a job by first terminating the launched OS process and it's calling goroutine.
 
 ## Tests
 
 Automated tests for the following behaviors will be implemented:
-- Server should return jobs scoped to a user when queried by a user, and all jobs when queried by an admin.
+- Server should return jobs scoped to a user when queried by a user, and all jobs when queried by an admin (authorization scope test)
 - Server should reject requests from clients with an invalid certificate (mTLS auth middleware test).
+- Job manager should allow executing, and monitoring jobs concurrently without data races.
