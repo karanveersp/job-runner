@@ -30,7 +30,7 @@ The following diagram illustrates the commands, core modules and how they relate
 
 The system uses mTLS authentication to create a secure communication channel between CLI clients and the gRPC server.
 
-Ther server uses the CN name contained in the client certificate to determine the client's role; either `user` or `admin`.
+The server uses the CN name contained in the client certificate to determine the client's role; either `user` or `admin`.
 
 ### Role differences
 - Users can list, monitor and stop jobs that they submitted.
@@ -67,11 +67,14 @@ For mTLS authentication, the client must set two environment variables:
 
 `start "<command with args>"`
 
-Submits the given shell command to the server and tails the job output, until the user presses ctrl+c. The job continues processing even if the client is no longer tailing the output.
+Submits the given shell command to the server and tails the job output, until the user presses ctrl+c. 
+The assigned job id is printed first so that the user can use it for other commands.
+The job continues processing even if the client is no longer tailing the output.
 
 Example
 ```sh
 $ jobr start "echo Hello!"
+Job id: 7766b
 Hello!
 ```
 
