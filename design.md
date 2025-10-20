@@ -58,9 +58,9 @@ The `jobr` CLI app is a user-friendly interface for remote job execution and man
 `-h` or `--help` - Provides CLI usage information.
 
 For mTLS authentication, the client must set environment variables:
-- `SSL_CERT_FILE` - Path to public certificate containing identity information and public key.
-- `SSL_KEY_FILE` - Path to private key file to generate a signature that the server verifies.
-- `CA_FILE` - Path to CA cert to verify server certificate
+- `CLIENT_CERT_FILE` - Path to public certificate containing identity information and public key.
+- `CLIENT_KEY_FILE` - Path to private key file to generate a signature that the server verifies.
+- `CA_FILE` - Path to CA cert to verify server certificate.
 
 ### Commands 
 
@@ -132,6 +132,12 @@ The server is responsible for
 - Implementing all RPC methods defined in the `.proto` file with appropriate responses and status codes.
 - Authentication using mTLS with client and server certificates and authorization using CN name derived from the client certificate.
 - Wrapping the job manager library and graceful shutdown of all goroutines when exiting.
+
+
+For mTLS authentication, the server env must set environment variables:
+- `SERVER_CERT_FILE` - Path to public certificate containing identity information and public key.
+- `SERVER_KEY_FILE` - Path to private key file to generate a signature that the client verifies.
+- `CA_FILE` - Path to CA cert to verify client certificate.
 
 ## Job Manager API Libary
 
