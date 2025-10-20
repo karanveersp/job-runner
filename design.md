@@ -57,9 +57,10 @@ The `jobr` CLI app is a user-friendly interface for remote job execution and man
 
 `-h` or `--help` - Provides CLI usage information.
 
-For mTLS authentication, the client must set two environment variables:
-- `SSL_CERT` - Path to public certificate containing identity information and public key.
-- `SSL_KEY` - Path to private key file to generate a signature that the server verifies.
+For mTLS authentication, the client must set environment variables:
+- `SSL_CERT_FILE` - Path to public certificate containing identity information and public key.
+- `SSL_KEY_FILE` - Path to private key file to generate a signature that the server verifies.
+- `CA_FILE` - Path to CA cert to verify server certificate
 
 ### Commands 
 
