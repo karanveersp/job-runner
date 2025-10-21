@@ -114,7 +114,7 @@ stop succeeded
 
 `monitor <jobId>`
 
-Queries the job's output from the beginning and tails it until the user presses ctrl+c.
+Queries the job's output from the beginning and tails it until it ends or the user presses ctrl+c.
 A user can monitor jobs they have started, while an admin can monitor any job.
 
 Example
