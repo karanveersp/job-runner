@@ -30,11 +30,17 @@ The following diagram illustrates the commands, core modules and how they relate
 
 The system uses mTLS authentication to create a secure communication channel between CLI clients and the gRPC server.
 
-The server uses the CN name contained in the client certificate to determine the client's role; either `user` or `admin`.
+TLS Version 1.3 is used which does not require any cipher suite preferences.
+
+For development and testing:
+- A self-signed CA cert will be generated.
+- 3 RSA key pairs will be generated to set up the client user, client admin, and server. All certs will be signed with the generated CA.
+
+The server will use the CN name contained in the client certificate to determine the client's role; either `user` or `admin`.
 
 ### Role differences
-- Users can list, monitor and stop jobs that they submitted.
-- Admins can list, monitor and stop jobs submitted by _any_ user.
+- Users can list the status of, monitor and stop jobs that they submitted.
+- Admins can list the status of, monitor and stop jobs submitted by _any_ user.
 
 ## Security Vulnerabilities
 
@@ -60,46 +66,51 @@ The `jobr` CLI app is a user-friendly interface for remote job execution and man
 For mTLS authentication, the client must set environment variables:
 - `CLIENT_CERT_FILE` - Path to public certificate containing identity information and public key.
 - `CLIENT_KEY_FILE` - Path to private key file to generate a signature that the server verifies.
-- `CA_FILE` - Path to CA cert to verify server certificate.
+- `CLIENT_CA_FILE` - Path to CA cert to verify server certificate.
 
 ### Commands 
 
 #### Start
 
-`start "<command with args>"`
+`start <program> <args...>`
 
-Submits the given shell command to the server and tails the job output, until the user presses ctrl+c. 
-The assigned job id is printed first so that the user can use it for other commands.
-The job continues processing even if the client is no longer tailing the output.
+The CLI application receives the program and all specified arguments.
+It submits the given program with its arguments (`os.Args[2:]`) to the server and receives the assigned job id.
 
-Example
-```sh
-$ jobr start "echo Hello!"
-Job id: 7766b
-Hello!
-```
-
-
-#### List jobs
-
-`ls`
-
-Lists all jobs submitted by the user. If the user is an admin, then lists jobs submitted by all users.
+The job id is printed to `stdout` directly.
 
 Example
 ```sh
-$ jobr ls
-JOB ID     COMMAND       STATUS     DURATION START TIME
-7766b      "echo Hello!" completed  1ms      2025-10-20T22:10:04.191Z
-112ab      "echo test"   completed  1ms      2025-10-20T22:11:00.191Z
+$ jobr start echo Hello!
+7766b
 ```
+
+
+#### List Job Status
+
+`ls <jobId>`
+
+Lists the job status for the given job id. An admin can list the status of any job, while a user can only list the status of jobs they submitted.
+
+Example for a successful job
+```sh
+$ jobr ls 7766b
+Status:COMPLETED ExitCode:0
+```
+
+Example for a job where the program was not found. The client can use the `monitor` command to see the errors since it combines both `stdout` and `stderr` streams.
+```sh
+$ jobr ls 7766b
+Status:FAILED ExitCode:127
+```
+
 
 
 #### Stop
 
 `stop <jobId>`
 
-Stops the job denoted by the given `jobId`. The `jobId` is a 5 character GUID assigned to each submitted job by the job manager which can be queried using the `ls` command.
+Stops the job denoted by the given `jobId`. The `jobId` is a 5 character GUID assigned to each submitted job by the job manager.
 A user can stop jobs they have started, while an admin can stop any job.
 An empty response indicates success, while an error with a status code provides information for why the job couldn't be stopped (NOT_FOUND, UNAUTHORIZED).
 
@@ -126,18 +137,16 @@ test
 
 ## GRPC Server
 
-The gRPC Server implements handlers for all supported job actions listed in the `.proto` file. For certain rpc methods, the responses can change based on the client's role derived from their certificate identity.
+The gRPC Server implements handlers for all supported job actions listed in the `.proto` file. For certain rpc methods, the responses differ based on the client's role derived from their certificate identity.
 
 The server is responsible for
 - Implementing all RPC methods defined in the `.proto` file with appropriate responses and status codes.
 - Authentication using mTLS with client and server certificates and authorization using CN name derived from the client certificate.
-- Wrapping the job manager library and graceful shutdown of all goroutines when exiting.
-
 
 For mTLS authentication, the server env must set environment variables:
 - `SERVER_CERT_FILE` - Path to public certificate containing identity information and public key.
 - `SERVER_KEY_FILE` - Path to private key file to generate a signature that the client verifies.
-- `CA_FILE` - Path to CA cert to verify client certificate.
+- `SERVER_CA_FILE` - Path to CA cert to verify client certificate.
 
 ## Job Manager API Libary
 
@@ -149,15 +158,75 @@ It is responsible for
 - Accepting new jobs for concurrent job execution using a worker pool.
 - Persisting job metadata and outputs for each submitted job.
   - Job ID is a 5 character GUID
-  - Job duration based on how much time was spent in the running state.
+  - Job output is stored in a `bytes.Buffer`
 - Updating the job status appropriately
   - `pending` for jobs accepted but not started
   - `running` for jobs executing on the server
   - `completed` for jobs that finished execution successfully
-  - `failed` for jobs that finished execution with a nonzero exit code, or timed out
+  - `failed` for jobs that finished execution with a nonzero exit code
   - `stopped` for jobs that were explicitly stopped by a user or admin
 - Tailing job output independent of job execution.
-- Gracefully stopping a job by first terminating the launched OS process and it's calling goroutine.
+- Gracefully stopping a job by cancelling the `exec.Cmd` context. 
+
+### Output Streaming
+
+A job can be monitored by multiple clients during job execution and afterwards.
+The client receives all historical output when they begin monitoring a job.
+If the command is `running`, the client tails the output until the status changes, or they press ctrl+c to stop tailing.
+
+This is current implementation plan to achieve this behavior.
+
+1. Job manager receives a new command from the GRPC Server to execute.
+2. It initializes a new `Job` type with a new job id, an `exec.Cmd` value, and a `bytes.Buffer` as an in-memory store.
+3. The `exec.Cmd` type allows lets the job manager access the `StdoutPipe` and `StderrPipe` as `io.ReadCloser` values. The manager creates and starts two goroutines to read from each pipe, respectively, and write to the `bytes.Buffer`. The writing can be synchronized by using a `RWMutex`, so that only one goroutine can write at a given time, and multiple reader goroutines can access the output history.
+4. Once the command starts running, it's output gets piped to the `bytes.Buffer`. In order to broadcast the output and allow decoupled "listeners" to receive the historical data, the `Job` type should contain a collection of listeners `[]Listener`. Each `Listener` provides a channel on which to send the output. So as each of the piped `stderr` and `stdout` outputs are written to the `bytes.Buffer`, those goroutines also iterate over the `Listeners` collection, and push to each channel. The manager should have an `AddListener` method which should be called after historical outputs have been sent to the listener channel to subscribe them.
+5. When the job ends, all listener channels should be closed. Any new requests to monitor the output will simply get the historcal data in that job's `bytes.Buffer`.
+  
+The sequence diagram describes the flow.
+
+```mermaid
+sequenceDiagram
+  title Job Initialization
+  participant GRPC as GRPC Server
+  participant JM as Job Manager
+  participant Job as Job Instance
+  participant Cmd as exec.Cmd
+  participant JT as Jobs Table<br/>map[string]*Job
+
+  Note over GRPC,JM: Step 1: Receive Command
+  GRPC->>JM: Submit Command Request
+
+  Note over JM,Job: Step 2: Initialize Job
+  JM->>JM: Generate job id
+  JM->>Job: Create *Job with id, exec.Cmd and bytes.Buffer
+  JM->>JT: Add to table with jobId as key
+  Job->>Job: Initialize empty []Listener
+
+
+  Note over Job,Cmd: Step 3: Setup Pipes & Start Readers
+  Job->>Cmd: Get StdoutPipe() -> io.ReadCloser
+  Job->>Cmd: Get StderrPipe() -> io.ReadCloser
+  Job->>Job: Start goroutines reading from pipes,<br/> writing to bytes.Buffer and broadcast to []Listeners
+  Job->>Cmd: Start() to begin executing job without blocking
+```
+
+
+Access to `bytes.Buffer` for reading/writing, and to the `[]Listener` collection to add/remove a listener will require mutexes since they're updated from separate goroutines.
+
+In order to remove a listener when the client disconnects with ctrl+c, the GRPC server can use the request's `ctx.Done()` signal and call the `RemoveListener` method. This will also close the listener's channel.
+
+
+### Stopping a Running Job
+
+To stop a running job, the plan is to use a cancellable context created when the job is initialized, and run `cancel()` when a `Stop` request is received.
+
+The manager passes this context to the [CommandContext](https://pkg.go.dev/os/exec#CommandContext) function to get an `exec.Cmd` reference.
+
+This allows the command to invoke it's `Cancel` function to kill the process when the context is done.
+
+The `StderrPipe` and `StdoutPipe` streams will subsequently close, causing the goroutines reading from them to close any listener channels before returning.
+
+
 
 ## Tests
 
