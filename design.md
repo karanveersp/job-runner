@@ -148,7 +148,7 @@ Note that all data is persisted in-memory and will be lost when the GRPC Server 
 It is responsible for
 - Accepting new jobs for concurrent job execution using a worker pool.
 - Persisting job metadata and outputs for each submitted job.
-  - Job ID is a 5 character GUI
+  - Job ID is a 5 character GUID
   - Job duration based on how much time was spent in the running state.
 - Updating the job status appropriately
   - `pending` for jobs accepted but not started
