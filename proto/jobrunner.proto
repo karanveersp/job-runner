@@ -7,7 +7,7 @@ package job_runner;
 // JobRunner is a remote job execution service.
 service JobRunner {
     // Start takes a command and returns a job id.
-    rpc Start(Command) returns (stream Job) {}
+    rpc Start(Command) returns (Job) {}
 
     // Stop takes a job id and returns an empty message or error. A User can only
     // stop jobs that they have started, while Admins can stop any job.
