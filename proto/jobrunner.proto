@@ -41,7 +41,7 @@ message Command {
 
 // Job is a simple wrapper on the job's id string
 message Job {
-    string id = 1;  // assigned job id
+    int64 id = 1;  // assigned job id
 }
 
 // JobMetadata provides job info

@@ -82,7 +82,7 @@ The job id is printed to `stdout` directly.
 Example
 ```sh
 $ jobr start echo Hello!
-7766b
+1
 ```
 
 
@@ -94,13 +94,13 @@ Lists the job status for the given job id. An admin can list the status of any j
 
 Example for a successful job
 ```sh
-$ jobr ls 7766b
+$ jobr ls 1
 Status:COMPLETED ExitCode:0
 ```
 
 Example for a job where the program was not found. The client can use the `monitor` command to see the errors since it combines both `stdout` and `stderr` streams.
 ```sh
-$ jobr ls 7766b
+$ jobr ls 1
 Status:FAILED ExitCode:127
 ```
 
@@ -110,13 +110,13 @@ Status:FAILED ExitCode:127
 
 `stop <jobId>`
 
-Stops the job denoted by the given `jobId`. The `jobId` is a 5 character GUID assigned to each submitted job by the job manager.
+Stops the job denoted by the given `jobId`. The `jobId` is an integer value assigned to each submitted job by the job manager.
 A user can stop jobs they have started, while an admin can stop any job.
 An empty response indicates success, while an error with a status code provides information for why the job couldn't be stopped (NOT_FOUND, UNAUTHORIZED).
 
 Example
 ```sh
-$ jobr stop 7766b
+$ jobr stop 1
 stop succeeded
 ```
 
@@ -130,7 +130,7 @@ A user can monitor jobs they have started, while an admin can monitor any job.
 
 Example
 ```sh
-$ jobr monitor 112ab
+$ jobr monitor 1
 test
 ```
 
@@ -157,7 +157,7 @@ Note that all data is persisted in-memory and will be lost when the GRPC Server 
 It is responsible for
 - Accepting new jobs for concurrent job execution using a worker pool.
 - Persisting job metadata and outputs for each submitted job.
-  - Job ID is a 5 character GUID
+  - Job ID is an `int64` value that is set from an incrementing `atomic.Int64` to guarantee uniqueness. When creating a new Job value, the manager adds to the atomic int, and assigns the new value as the id.
   - Job output is stored in a `bytes.Buffer`
 - Updating the job status appropriately
   - `pending` for jobs accepted but not started
@@ -191,7 +191,7 @@ sequenceDiagram
   participant JM as Job Manager
   participant Job as Job Instance
   participant Cmd as exec.Cmd
-  participant JT as Jobs Table<br/>map[string]*Job
+  participant JT as Jobs Table<br/>map[int64]*Job
 
   Note over GRPC,JM: Step 1: Receive Command
   GRPC->>JM: Submit Command Request
@@ -231,6 +231,6 @@ The `StderrPipe` and `StdoutPipe` streams will subsequently close, causing the g
 ## Tests
 
 Automated tests for the following behaviors will be implemented:
-- Server should return jobs scoped to a user when queried by a user, and all jobs when queried by an admin (authorization scope test)
+- Server should only list the job status of job ids scoped to that user, and allow admins to list the status of any job id. (authorization scope test)
 - Server should reject requests from clients with an invalid certificate (mTLS auth middleware test).
 - Job manager should allow executing, and monitoring jobs concurrently without data races.
