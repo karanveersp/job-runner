@@ -7,19 +7,19 @@ package job_runner;
 // JobRunner is a remote job execution service.
 service JobRunner {
     // Start takes a command and returns a job id.
-    rpc Start(Command) returns (Job) {}
+    rpc Start(StartJobInput) returns (StartJobOutput) {}
 
     // Stop takes a job id and returns an empty message or error. A User can only
     // stop jobs that they have started, while Admins can stop any job.
-    rpc Stop(Job) returns (Empty) {}
+    rpc Stop(StopJobInput) returns (Empty) {}
 
-    // List takes a job id and returns metadata.
-    // Users only list a job that they have started, while Admins can list any job.
-    rpc List(Job) returns (JobMetadata) {}
+    // Status takes a job id and returns metadata.
+    // Users only check the status of a job that they have started, while Admins can check it any job.
+    rpc Status(JobStatusInput) returns (JobMetadata) {}
 
     // Monitor takes a job id and tails the output from the beginning. A User
     // can only monitor their jobs, while Admins can monitor any job.
-    rpc Monitor(Job) returns (stream Output) {}
+    rpc Monitor(MonitorJobInput) returns (stream Output) {}
 }
 
 // Status models all job states
@@ -34,13 +34,23 @@ enum Status {
 // Empty represents a unit or empty value
 message Empty {}
 
-// Command is a simple wrapper on the command string slice
-message Command {
+message StartJobInput {
     repeated string cmd = 1; // includes program and arguments
 }
 
-// Job is a simple wrapper on the job's id string
-message Job {
+message StartJobOutput {
+    int64 id = 1; // assigned job id
+}
+
+message JobStatusInput {
+    int64 id = 1;  // assigned job id
+}
+
+message StopJobInput {
+    int64 id = 1;  // assigned job id
+}
+
+message MonitorJobInput {
     int64 id = 1;  // assigned job id
 }
 

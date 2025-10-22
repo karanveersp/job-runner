@@ -86,24 +86,23 @@ $ jobr start echo Hello!
 ```
 
 
-#### List Job Status
+#### Status
 
-`ls <jobId>`
+`status <jobId>`
 
-Lists the job status for the given job id. An admin can list the status of any job, while a user can only list the status of jobs they submitted.
+Gets the job status for the given job id. An admin can get the status of any job, while a user can only get the status of jobs they submitted.
 
 Example for a successful job
 ```sh
-$ jobr ls 1
+$ jobr status 1
 Status:COMPLETED ExitCode:0
 ```
 
 Example for a job where the program was not found. The client can use the `monitor` command to see the errors since it combines both `stdout` and `stderr` streams.
 ```sh
-$ jobr ls 1
+$ jobr status 1
 Status:FAILED ExitCode:127
 ```
-
 
 
 #### Stop
@@ -171,8 +170,7 @@ It is responsible for
 ### Output Streaming
 
 A job can be monitored by multiple clients during job execution and afterwards.
-The client receives all historical output when they begin monitoring a job.
-If the command is `running`, the client tails the output until the status changes, or they press ctrl+c to stop tailing.
+The client receives all output from the beginning, before tailing the output if the job is running.
 
 This is current implementation plan to achieve this behavior.
 
@@ -231,6 +229,6 @@ The `StderrPipe` and `StdoutPipe` streams will subsequently close, causing the g
 ## Tests
 
 Automated tests for the following behaviors will be implemented:
-- Server should only list the job status of job ids scoped to that user, and allow admins to list the status of any job id. (authorization scope test)
+- Server should only get the job status of job ids scoped to that user, and allow admins to get the status of any job id. (authorization scope test)
 - Server should reject requests from clients with an invalid certificate (mTLS auth middleware test).
 - Job manager should allow executing, and monitoring jobs concurrently without data races.
