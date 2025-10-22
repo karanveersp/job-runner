@@ -147,6 +147,22 @@ For mTLS authentication, the server env must set environment variables:
 - `SERVER_KEY_FILE` - Path to private key file to generate a signature that the client verifies.
 - `SERVER_CA_FILE` - Path to CA cert to verify client certificate.
 
+### Monitor RPC Method
+
+This diagram describes the arcitecture of the Monitor handler that uses 2 channels to capture and send all data.
+![Monitor Design](MonitorDesign.jpg)
+
+When the monitor method starts, we create a client specific cancellable context, that is related with the `request.Context`.
+- If the client disconnects and `request.Context` is Done, we cancel the monitor's `ctx` to model the ctrl+c behavior.
+- Cancelling the monitor's context will affect all observers of the context.
+  - The `ObjectStore.Subscribe` method receives the cancellation signal, and closes both `historyChan` and `liveChan`.
+  - The `Job.AddListener` method receives cancellation signal, and calls `Job.RemoveListener` to prevent further writes to `liveChan`.
+
+The output is being piped from stdout/stderr in separate goroutines.
+This goroutine is active until the job is in the `running` state, and pipes are open.
+So writing to Listeners with `liveChan` can take place here.
+![Pipe Gouroutines](PipeGoroutines.jpg)
+
 ## Job Manager API Libary
 
 The job manager library implements the functionality to start, stop, persist and monitor job executions on the server.
@@ -177,8 +193,8 @@ This is current implementation plan to achieve this behavior.
 1. Job manager receives a new command from the GRPC Server to execute.
 2. It initializes a new `Job` value with a new job id, an `exec.Cmd` value, and a `bytes.Buffer` as an in-memory store.
 3. The `exec.Cmd` type lets the job manager access the `StdoutPipe` and `StderrPipe` as `io.ReadCloser` values. The manager creates and starts two goroutines to read from each pipe and write to the `bytes.Buffer`. The writing can be synchronized by using a `RWMutex`, so that only one goroutine can write at a given time, and multiple reader goroutines can access the output history.
-4. Once the command starts running, it's output gets piped to the `bytes.Buffer`. In order to broadcast the output and allow decoupled listeners to receive the historical data, the `Job` type has a collection of listeners `[]Listener`. Each `Listener` provides a channel on which to send the output. As each of the piped `stderr` and `stdout` outputs are written to the `bytes.Buffer`, those goroutines also iterate over the `Listeners` collection, and push to each channel. The manager has an `AddListener` method which is called after historical outputs have been sent to the listener channel to subscribe them.
-5. When the job ends, all listener channels will be closed. Any new requests to monitor the output will simply get the historcal data in that job's `bytes.Buffer`.
+4. Once the command starts running, it's output gets piped to the `bytes.Buffer`. In order to broadcast the live output and allow decoupled listeners, the `Job` type has a collection of listeners `[]Listener`. Each `Listener` provides a channel on which to send the live output. As each of the piped `stderr` and `stdout` outputs are written to the `bytes.Buffer`, those goroutines also iterate over the `Listeners` collection, and push to each channel. The job has an `AddListener` method which calls `OutputStorer.Subscribe` to get a refernece to the `historyChan` and `liveChan`. It creates a `Listener` with the `liveChan` and appends it to `[]Listener` so that the live output can start to be captured for the client.
+5. Any new requests to monitor the output after a job is complete will simply get the historcal data from the `historyChan`.
   
 The sequence diagram describes the flow.
 
@@ -208,11 +224,7 @@ sequenceDiagram
   Job->>Cmd: Start() to begin executing job without blocking
 ```
 
-
 Access to `bytes.Buffer` for reading/writing, and to the `[]Listener` collection to add/remove a listener will require mutexes since they're updated from separate goroutines.
-
-In order to remove a listener when the client disconnects with ctrl+c, the GRPC server can use the request's `ctx.Done()` signal and call the `RemoveListener` method. This will also close the listener's channel.
-
 
 ### Stopping a Running Job
 
