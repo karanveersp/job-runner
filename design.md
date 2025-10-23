@@ -150,18 +150,13 @@ For mTLS authentication, the server env must set environment variables:
 ### Monitor RPC Method
 
 This diagram describes the arcitecture of the Monitor handler that uses 2 channels to capture and send all data.
-![Monitor Design](MonitorDesign.jpg)
+![Monitor Design](MonitorDesignV2.jpg)
 
 When the monitor method starts, we create a client specific cancellable context, that is related with the `request.Context`.
 - If the client disconnects and `request.Context` is Done, we cancel the monitor's `ctx` to model the ctrl+c behavior.
 - Cancelling the monitor's context will affect all observers of the context.
-  - The `ObjectStore.Subscribe` method receives the cancellation signal, and closes both `historyChan` and `liveChan`.
-  - The `Job.AddListener` method receives cancellation signal, and calls `Job.RemoveListener` to prevent further writes to `liveChan`.
-
-The output is being piped from stdout/stderr in separate goroutines.
-This goroutine is active until the job is in the `running` state, and pipes are open.
-So writing to Listeners with `liveChan` can take place here.
-![Pipe Gouroutines](PipeGoroutines.jpg)
+  
+  The `OutputStorer.Subscribe` method receives the cancellation signal, and closes both `historyChan` and `liveChan`, and removes the listener that contains `liveChan`.
 
 ## Job Manager API Libary
 
@@ -191,9 +186,11 @@ The client receives all output from the beginning, before tailing the output if 
 This is current implementation plan to achieve this behavior.
 
 1. Job manager receives a new command from the GRPC Server to execute.
-2. It initializes a new `Job` value with a new job id, an `exec.Cmd` value, and a `bytes.Buffer` as an in-memory store.
-3. The `exec.Cmd` type lets the job manager access the `StdoutPipe` and `StderrPipe` as `io.ReadCloser` values. The manager creates and starts two goroutines to read from each pipe and write to the `bytes.Buffer`. The writing can be synchronized by using a `RWMutex`, so that only one goroutine can write at a given time, and multiple reader goroutines can access the output history.
-4. Once the command starts running, it's output gets piped to the `bytes.Buffer`. In order to broadcast the live output and allow decoupled listeners, the `Job` type has a collection of listeners `[]Listener`. Each `Listener` provides a channel on which to send the live output. As each of the piped `stderr` and `stdout` outputs are written to the `bytes.Buffer`, those goroutines also iterate over the `Listeners` collection, and push to each channel. The job has an `AddListener` method which calls `OutputStorer.Subscribe` to get a refernece to the `historyChan` and `liveChan`. It creates a `Listener` with the `liveChan` and appends it to `[]Listener` so that the live output can start to be captured for the client.
+2. It initializes a new `Job` value with a new job id, an `exec.Cmd` value, and an `OutputStorer` that encapsulates a `bytes.Buffer` as an in-memory store. When an `OutputStorer` is created with `New`, it provides an `outputChan` which the caller can send job outputs to.
+3. The `exec.Cmd` type lets the job manager access the `StdoutPipe` and `StderrPipe` as `io.ReadCloser` values. The manager creates and starts two goroutines to read from each pipe and write to an `outputChan`.
+4. Once the command starts running, it's output gets piped to the `outputChan`. In order to broadcast the live output and allow decoupled listeners, the `OutputStorer` type has a collection of listeners `[]Listener`. Each `Listener` provides a channel on which to send the live output. 
+
+   The goroutine in `OutputStorer` that reads from `outputChan` to push to the internal `bytes.Buffer`, will also iterate over the `Listeners` collection, and push to each `liveChan`.
 5. Any new requests to monitor the output after a job is complete will simply get the historcal data from the `historyChan`.
   
 The sequence diagram describes the flow.
@@ -205,6 +202,7 @@ sequenceDiagram
   participant JM as Job Manager
   participant Job as Job Instance
   participant Cmd as exec.Cmd
+  participant OS as Output Storer
   participant JT as Jobs Table<br/>map[int64]*Job
 
   Note over GRPC,JM: Step 1: Receive Command
@@ -212,19 +210,23 @@ sequenceDiagram
 
   Note over JM,Job: Step 2: Initialize Job
   JM->>JM: Generate job id
-  JM->>Job: Create *Job with id, exec.Cmd and bytes.Buffer
+  JM->>Job: Create *Job with id, exec.Cmd 
   JM->>JT: Add to table with jobId as key
-  Job->>Job: Initialize empty []Listener
-
+  Job->>OS: Create new OutputStorer
+  OS->>OS: Creates outputChan, bytes.Buffer<br/>and starts reader goroutine to consume output.
+  OS->>Job: Return outputChan
 
   Note over Job,Cmd: Step 3: Setup Pipes & Start Readers
   Job->>Cmd: Get StdoutPipe() -> io.ReadCloser
   Job->>Cmd: Get StderrPipe() -> io.ReadCloser
-  Job->>Job: Start goroutines reading from pipes,<br/> writing to bytes.Buffer and broadcast to []Listeners
+  Job->>Job: Start goroutines reading from pipes,<br/> writing to outputChan
   Job->>Cmd: Start() to begin executing job without blocking
 ```
 
-Access to `bytes.Buffer` for reading/writing, and to the `[]Listener` collection to add/remove a listener will require mutexes since they're updated from separate goroutines.
+This diagram describes the `OutputStorer` and the pipe goroutines.
+
+![Pipe Goroutines](PipeGoroutines.jpg)
+
 
 ### Stopping a Running Job
 
