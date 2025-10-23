@@ -24,11 +24,12 @@ service JobRunner {
 
 // Status models all job states
 enum Status {
-    PENDING = 0;
-    RUNNING = 1;
-    COMPLETED = 2;
-    FAILED = 3;
-    STOPPED = 4;
+    ENUM_TYPE_NAME_UNKNOWN = 0;
+    PENDING = 1;
+    RUNNING = 2;
+    COMPLETED = 3;
+    FAILED = 4;
+    STOPPED = 5;
 }
 
 // Empty represents a unit or empty value
