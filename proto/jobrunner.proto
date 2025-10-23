@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+option go_package = "github.com/karanveersp/job-runner/proto;jobrunner";
+
+package job_runner;
+
+// JobRunner is a remote job execution service.
+service JobRunner {
+    // Start takes a command and returns a job id.
+    rpc Start(StartJobInput) returns (StartJobOutput) {}
+
+    // Stop takes a job id and returns an empty message or error. A User can only
+    // stop jobs that they have started, while Admins can stop any job.
+    rpc Stop(StopJobInput) returns (Empty) {}
+
+    // Status takes a job id and returns metadata.
+    // Users only check the status of a job that they have started, while Admins can check it any job.
+    rpc Status(JobStatusInput) returns (JobMetadata) {}
+
+    // Monitor takes a job id and tails the output from the beginning. A User
+    // can only monitor their jobs, while Admins can monitor any job.
+    rpc Monitor(MonitorJobInput) returns (stream Output) {}
+}
+
+// Status models all job states
+enum Status {
+    ENUM_TYPE_NAME_UNKNOWN = 0;
+    PENDING = 1;
+    RUNNING = 2;
+    COMPLETED = 3;
+    FAILED = 4;
+    STOPPED = 5;
+}
+
+// Empty represents a unit or empty value
+message Empty {}
+
+message StartJobInput {
+    repeated string cmd = 1; // includes program and arguments
+}
+
+message StartJobOutput {
+    int64 id = 1; // assigned job id
+}
+
+message JobStatusInput {
+    int64 id = 1;  // assigned job id
+}
+
+message StopJobInput {
+    int64 id = 1;  // assigned job id
+}
+
+message MonitorJobInput {
+    int64 id = 1;  // assigned job id
+}
+
+// JobMetadata provides job info
+message JobMetadata {
+    Status status = 1;        // job status
+    int32 exit_code = 2;      // job exit code
+}
+
+// Output is a wrapper on the []byte received from the server
+message Output {
+    bytes chunk = 1; // combined stdout and stderr output
+}
